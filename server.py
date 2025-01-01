@@ -25,10 +25,17 @@ clubs = loadClubs()
 def index():
     return render_template('index.html')
 
-@app.route('/showSummary',methods=['POST'])
+@app.route('/showSummary', methods=['POST'])
 def showSummary():
-    club = [club for club in clubs if club['email'] == request.form['email']][0]
-    return render_template('welcome.html',club=club,competitions=competitions)
+    # Vérifie si l'email existe dans les clubs
+    club = next((club for club in clubs if club['email'] == request.form['email']), None)
+    
+    # Si l'email est trouvé, afficher la page de résumé
+    if club:
+        return render_template('welcome.html', club=club, competitions=competitions)
+    else:
+        flash("Sorry, that email wasn't found.")  # Message flash une seule fois
+        return redirect(url_for('index'))  # Redirige vers la page d'accueil pour afficher le message
 
 
 @app.route('/book/<competition>/<club>')
