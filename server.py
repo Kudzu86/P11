@@ -41,17 +41,29 @@ def book(competition,club):
         return render_template('welcome.html', club=club, competitions=competitions)
 
 
-@app.route('/purchasePlaces',methods=['POST'])
+@app.route('/purchasePlaces', methods=['POST'])
 def purchasePlaces():
     competition = [c for c in competitions if c['name'] == request.form['competition']][0]
     club = [c for c in clubs if c['name'] == request.form['club']][0]
     placesRequired = int(request.form['places'])
-    competition['numberOfPlaces'] = int(competition['numberOfPlaces'])-placesRequired
-    flash('Great-booking complete!')
+
+    # Convertir les points du club en entier avant la comparaison
+    club_points = int(club['points'])  # Assurez-vous que les points sont un entier
+
+    # Vérifier qu'il y a assez de points pour réserver les places
+    if club_points >= placesRequired:
+        competition['numberOfPlaces'] = int(competition['numberOfPlaces']) - placesRequired
+        club['points'] = str(club_points - placesRequired)  # Assurez-vous que les points sont stockés en tant que chaîne
+
+        # Mettre à jour les données dans le fichier clubs.json
+        with open('clubs.json', 'w') as f:
+            json.dump({'clubs': clubs}, f, indent=4)
+
+        flash('Booking complete! Points have been deducted.')
+    else:
+        flash('Not enough points to complete the booking.')
+
     return render_template('welcome.html', club=club, competitions=competitions)
-
-
-# TODO: Add route for points display
 
 
 @app.route('/logout')
