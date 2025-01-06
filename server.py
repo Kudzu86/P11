@@ -1,110 +1,117 @@
-import json
 import datetime
-from flask import Flask,render_template,request,redirect,flash,url_for
-
+import os
+from flask import Flask, render_template, request, redirect, flash, url_for, session
+import json
 
 def loadClubs():
-    with open('clubs.json') as c:
-         listOfClubs = json.load(c)['clubs']
-         return listOfClubs
-
+   # Charge les clubs depuis le fichier json
+   with open(os.getenv('CLUBS_JSON_FILE', 'clubs.json')) as c:
+        return json.load(c)['clubs']
 
 def loadCompetitions():
-    with open('competitions.json') as comps:
-         listOfCompetitions = json.load(comps)['competitions']
-         return listOfCompetitions
+   # Charge les compétitions depuis le fichier json 
+   with open(os.getenv('COMPETITIONS_JSON_FILE', 'competitions.json')) as comps:
+        return json.load(comps)['competitions']
 
+def create_app(test_config=None):
+   app = Flask(__name__)
+   app.secret_key = 'something_special'
+   
+   # Charge la config des fichiers ou de test
+   if test_config is None:
+       app.config.from_mapping(
+           CLUBS=loadClubs(),
+           COMPETITIONS=loadCompetitions()
+       )
+   else:
+       app.config.update(test_config)
 
-app = Flask(__name__)
-app.secret_key = 'something_special'
+   @app.route('/')
+   def index():
+       return render_template('index.html')
 
-competitions = loadCompetitions()
-clubs = loadClubs()
+   @app.route('/showSummary', methods=['GET', 'POST']) 
+   def showSummary():
+       if request.method == 'POST':
+           # Trouve le club par email
+           club = next((club for club in app.config['CLUBS'] if club['email'] == request.form['email']), None)
+           if club:
+               session['email'] = club['email']
+               return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
+           flash("Sorry, that email wasn't found.")
+           return redirect(url_for('index'))
+       
+       if 'email' in session:
+           club = next((club for club in app.config['CLUBS'] if club['email'] == session['email']), None)
+           return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
+       return redirect(url_for('index'))
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+   @app.route('/book/<competition>/<club>')
+   def book(competition, club):
+       foundClub = next((c for c in app.config['CLUBS'] if c['name'] == club), None)
+       foundCompetition = next((c for c in app.config['COMPETITIONS'] if c['name'] == competition), None)
 
-@app.route('/showSummary', methods=['POST'])
-def showSummary():
-    # Vérifie si l'email existe dans les clubs
-    club = next((club for club in clubs if club['email'] == request.form['email']), None)
-    
-    # Si l'email est trouvé, afficher la page de résumé
-    if club:
-        return render_template('welcome.html', club=club, competitions=competitions)
-    else:
-        flash("Sorry, that email wasn't found.")  # Message flash une seule fois
-        return redirect(url_for('index'))  # Redirige vers la page d'accueil pour afficher le message
+       if foundClub and foundCompetition:
+           # Vérifie si la compétition est passée
+           if datetime.datetime.strptime(foundCompetition['date'], '%Y-%m-%d %H:%M:%S') < datetime.datetime.now():
+               flash("Cannot book places for a past competition.")
+               return render_template('welcome.html', club=foundClub, competitions=app.config['COMPETITIONS'])
+           return render_template('booking.html', club=foundClub, competition=foundCompetition)
 
+       flash("Something went wrong - please try again.")
+       return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
 
-@app.route('/book/<competition>/<club>')
-def book(competition, club):
-    # Recherche du club et de la compétition
-    foundClub = [c for c in clubs if c['name'] == club][0]
-    foundCompetition = [c for c in competitions if c['name'] == competition][0]
+   @app.route('/purchasePlaces', methods=['POST'])
+   def purchasePlaces():
+       competition = next((c for c in app.config['COMPETITIONS'] if c['name'] == request.form['competition']), None)
+       club = next((c for c in app.config['CLUBS'] if c['name'] == request.form['club']), None)
 
-    # Vérification si la compétition existe
-    if foundClub and foundCompetition:
-        # Récupérer la date de la compétition et la convertir en objet datetime
-        competition_date = datetime.datetime.strptime(foundCompetition['date'], '%Y-%m-%d %H:%M:%S') # Assurez-vous que le format de la date est correct
-        current_date = datetime.datetime.now()
+       # Validation du nombre de places
+       try:
+           placesRequired = int(request.form['places'])
+           if placesRequired <= 0:
+               flash("You cannot book a negative or zero number of places.")
+               return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
+       except ValueError:
+           flash("Invalid input. Please enter a valid number of places.")
+           return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
 
-        # Si la compétition est dans le passé, on affiche un message d'erreur
-        if competition_date < current_date:
-            flash("Cannot book places for a past competition.")
-            return render_template('welcome.html', club=foundClub, competitions=competitions)
-        else:
-            # Si la compétition est valide, on affiche la page de réservation
-            flash("Competition is valid. Proceed with booking.")
-            return render_template('booking.html', club=foundClub, competition=foundCompetition)
-    else:
-        flash("Something went wrong - please try again.")
-        return render_template('welcome.html', club=club, competitions=competitions)
+       # Vérification des limites de réservation
+       if placesRequired > 12:
+           flash("You cannot book more than 12 places for a competition.")
+           return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
 
+       if int(club['points']) < placesRequired:
+           flash("You do not have enough points to book these places.")
+           return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
 
-@app.route('/purchasePlaces', methods=['POST'])
-def purchasePlaces():
-    competition = [c for c in competitions if c['name'] == request.form['competition']][0]
-    club = [c for c in clubs if c['name'] == request.form['club']][0]
-    placesRequired = int(request.form['places'])
+       if int(competition['numberOfPlaces']) < placesRequired:
+           flash("Not enough places available in the competition.")
+           return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
+       
+       # Mise à jour des données compétition et club
+       competition['numberOfPlaces'] = str(int(competition['numberOfPlaces']) - placesRequired)
+       club['points'] = str(int(club['points']) - placesRequired)
 
-    # Vérifier si le nombre de places demandées dépasse 12
-    if placesRequired > 12:
-        flash("You cannot book more than 12 places for a competition.")
-        return render_template('welcome.html', club=club, competitions=competitions)
+       # Sauvegarde si pas en mode test
+       if not app.config.get('TESTING'):
+           with open(os.getenv('CLUBS_JSON_FILE', 'clubs.json'), 'w') as f:
+               json.dump({'clubs': app.config['CLUBS']}, f, indent=4)
+           with open(os.getenv('COMPETITIONS_JSON_FILE', 'competitions.json'), 'w') as f:
+               json.dump({'competitions': app.config['COMPETITIONS']}, f, indent=4)
 
-    # Vérifier si la compétition a suffisamment de places disponibles
-    if int(competition['numberOfPlaces']) < placesRequired:
-        flash("Not enough places available in the competition.")
-        return render_template('welcome.html', club=club, competitions=competitions)
+       flash('Great-booking complete! Points have been deducted.')
+       return render_template('welcome.html', club=club, competitions=app.config['COMPETITIONS'])
 
-    # Vérifier si le club a suffisamment de points
-    if int(club['points']) < placesRequired:
-        flash("You do not have enough points to book these places.")
-        return render_template('welcome.html', club=club, competitions=competitions)
-    
-    # Mettre à jour le nombre de places du concours
-    competition['numberOfPlaces'] = str(int(competition['numberOfPlaces']) - placesRequired)
-    
-    # Mettre à jour les points du club
-    club_points = int(club['points'])
-    club['points'] = str(club_points - placesRequired)
+   @app.route('/showClubs')
+   def showClubs():
+       return render_template('clubs.html', clubs=app.config['CLUBS'])
 
-    # Sauvegarder les modifications dans le fichier clubs.json
-    with open('clubs.json', 'w') as f:
-        json.dump({'clubs': clubs}, f, indent=4)
+   @app.route('/logout')
+   def logout():
+       session.pop('email', None)
+       return redirect(url_for('index'))
 
-    flash('Great-booking complete! Points have been deducted.')
-    return render_template('welcome.html', club=club, competitions=competitions)
+   return app
 
-
-
-@app.route('/showClubs')
-def showClubs():
-    return render_template('clubs.html', clubs=clubs)
-
-
-@app.route('/logout')
-def logout():
-    return redirect(url_for('index'))
+app = create_app()

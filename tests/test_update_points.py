@@ -1,31 +1,33 @@
 import pytest
-import json
 from server import app
 
-# Création d'un client de test pour faire les requêtes HTTP
+
 @pytest.fixture
 def client():
-    with app.test_client() as client:
-        yield client
+   # Configuration minimale pour les tests de purchase
+   app.config['TESTING'] = True
+   with app.test_client() as client:
+       # Données de test avec points suffisants pour réservation
+       app.config['CLUBS'] = [{'name': 'Simply Lift', 'points': '25', 'email': 'john@simplylift.co'}]
+       app.config['COMPETITIONS'] = [{'name': 'Spring Festival', 'date': '2024-03-27 10:00:00', 'numberOfPlaces': '25'}]
+       yield client
 
-# Fonction pour charger les clubs depuis le fichier clubs.json
-def load_clubs():
-    with open('clubs.json') as c:
-        return json.load(c)['clubs']
-
-# Test de la mise à jour des points lors de la réservation de places
 def test_purchase_places(client):
-    # Simuler une requête pour réserver 8 places pour un club
-    response = client.post('/purchasePlaces', data={'competition': 'Spring Festival', 'club': 'Simply Lift', 'places': '2'})
+   # Capture des points avant réservation 
+   club = next(c for c in app.config['CLUBS'] if c['name'] == 'Simply Lift')
+   initial_points = int(club['points'])
 
-    # Vérifier que la réservation a été effectuée
-    assert b'Great-booking complete! Points have been deducted.' in response.data
+   # Simulation réservation de 2 places
+   response = client.post('/purchasePlaces', data={
+       'competition': 'Spring Festival',
+       'club': 'Simply Lift',
+       'places': '2'
+   })
 
-    # Charger la liste des clubs après la réservation
-    clubs = load_clubs()
-
-    # Vérifier que le nombre de points du club a bien été mis à jour
-    club = next(c for c in clubs if c['name'] == 'Simply Lift')
-    assert club['points'] == '3'  # Cela vérifiera que la mise à jour est bien effectuée
-    
-
+   # Vérification réservation réussie
+   assert response.status_code == 200  
+   assert b'Great-booking complete! Points have been deducted.' in response.data
+   
+   # Vérification déduction des points
+   updated_club = next(c for c in app.config['CLUBS'] if c['name'] == 'Simply Lift')
+   assert int(updated_club['points']) == initial_points - 2
