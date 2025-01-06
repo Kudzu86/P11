@@ -3,6 +3,7 @@ import os
 from flask import Flask, render_template, request, redirect, flash, url_for, session
 import json
 
+
 def loadClubs():
    # Charge les clubs depuis le fichier json
    with open(os.getenv('CLUBS_JSON_FILE', 'clubs.json')) as c:
